@@ -1,43 +1,26 @@
 import telebot
-from datetime import datetime
-import time
-import threading
-from reg import TOKEN
+import db
 
+TOKEN = "8723046268:AAHeSE5gLp7xpRFH_rpmIaOIUUHHihhyMTs"
 bot = telebot.TeleBot(TOKEN)
 
 SCHEDULE = "📅 СБ 19:00 - Штучка 🌟"
 
-# Клавиатура
 keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
 keyboard.row("📅 Расписание", "⭐ Оценить урок")
 keyboard.row("ℹ️ О школе", "📞 Контакты")
+keyboard.row("📊 Личный кабинет")
 
-# Хранилище оценок
-ratings = []
-
-# ========== НАПОМИНАНИЕ (простое и понятное) ==========
-def reminder():
-    """Простое напоминание каждую субботу в 18:40"""
-    while True:
-        now = datetime.now()
-        # Суббота = 5 (пн=0, вт=1, ср=2, чт=3, пт=4, сб=5, вс=6)
-        if now.weekday() == 5 and now.hour == 18 and now.minute == 40:
-            bot.send_message(8723046268, "⏰ Напоминание!\n\nЧерез 20 минут урок: Штучка 🌟\n\nГотовься!")
-            time.sleep(61)  # Чтобы не отправляло несколько раз
-        time.sleep(30)
-
-# Запускаем напоминания в отдельном потоке
-threading.Thread(target=reminder, daemon=True).start()
-
-# ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(
-        message.chat.id,
-        f"Привет, {message.chat.first_name}!\n\n📅 Расписание: СБ 19:00\n⏰ Напомню за 20 минут\n⭐ После урока поставь оценку!",
-        reply_markup=keyboard
-    )
+    # Открываем картинку nn.jpg из папки с ботом
+    with open('nn.png', 'rb') as photo:
+        bot.send_photo(
+            message.chat.id,
+            photo,
+            caption=f"🌟 Привет, {message.chat.first_name}!\n\n📅 Расписание: СБ 19:00\n⭐ После урока поставь оценку!",
+            reply_markup=keyboard
+        )
 
 @bot.message_handler(func=lambda message: message.text == "📅 Расписание")
 def get_schedule(message):
@@ -63,29 +46,46 @@ def rate_lesson(message):
     )
     bot.send_message(message.chat.id, "Как прошёл урок?", reply_markup=markup)
 
+@bot.message_handler(func=lambda message: message.text == "📊 Личный кабинет")
+def profile(message):
+    user_id = str(message.chat.id)
+    ratings = db.get_ratings(user_id)
+    
+    total = len(ratings)
+    avg = sum(r[0] for r in ratings) / total if total > 0 else 0
+    
+    text = f"""
+👤 Личный кабинет
+
+Имя: {message.chat.first_name}
+Всего оценок: {total}
+Средний балл: {avg:.1f}
+    """
+    bot.send_message(message.chat.id, text, reply_markup=keyboard)
+
 @bot.callback_query_handler(func=lambda call: True)
 def save_rating(call):
     rating = int(call.data)
+    user_id = str(call.message.chat.id)
     
-    ratings.append({
-        'rating': rating,
-        'date': datetime.now().strftime("%d.%m.%Y %H:%M")
-    })
+    db.save_rating(user_id, rating)
+    
+    ratings = db.get_ratings(user_id)
+    total = len(ratings)
+    avg = sum(r[0] for r in ratings) / total
     
     if rating == 5:
-        msg = "🌟 Супер! Рад, что понравилось!"
+        msg = "🌟 Супер!"
     elif rating == 4:
-        msg = "😊 Хорошо! Спасибо!"
+        msg = "😊 Хорошо!"
     elif rating == 3:
-        msg = "🙂 Спасибо! Что улучшить?"
+        msg = "🙂 Спасибо!"
     elif rating == 2:
-        msg = "😐 Понял, сделаем лучше!"
+        msg = "😐 Понял!"
     else:
-        msg = "😔 Жаль... Напиши, что не так?"
+        msg = "😔 Жаль..."
     
-    if ratings:
-        avg = sum(r['rating'] for r in ratings) / len(ratings)
-        msg += f"\n\n📊 Всего оценок: {len(ratings)}\n⭐ Средний балл: {avg:.1f}"
+    msg += f"\n\n📊 Всего оценок: {total}\n⭐ Средний балл: {avg:.1f}"
     
     bot.edit_message_text(msg, call.message.chat.id, call.message.message_id)
 
@@ -94,7 +94,6 @@ def unknown(message):
     bot.send_message(message.chat.id, "Используй кнопки 👇", reply_markup=keyboard)
 
 if __name__ == "__main__":
-    print("✅ Бот запущен!")
-    print("📅 Расписание: СБ 19:00")
-    print("⏰ Напоминание придёт в субботу в 18:40")
+    db.init_db()
+    print("✅ Бот запущен! Картинка nn.jpg подключена.")
     bot.infinity_polling()
